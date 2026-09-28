@@ -27,6 +27,10 @@ on:
         description: "Gemini model id"
         required: false
         default: "gemini-3.6-flash"
+      selftest:
+        description: "Check the backend only, translate nothing (yes/no)"
+        required: false
+        default: "no"
 
 permissions:
   contents: write
@@ -91,22 +95,52 @@ jobs:
           EOF
           nohup /tmp/gemini-web2api --config /tmp/gw2a.json > /tmp/gw2a.log 2>&1 &
           echo $! > /tmp/gw2a.pid
+          # the service auto-generates an API key and only prints it masked,
+          # so read it back out of its own sqlite store
           for i in $(seq 1 30); do
-            if curl -sf -m 5 http://127.0.0.1:8083/v1/models > /tmp/models.json; then
+            if [ -s /tmp/gemini.db ]; then
+              python3 - <<'PY' > /tmp/gw2a.key
+          import sqlite3
+          try:
+              r = list(sqlite3.connect("/tmp/gemini.db").execute("select v from kv where k='api_key'"))
+              print(r[0][0] if r else "")
+          except Exception:
+              print("")
+          PY
+              [ -s /tmp/gw2a.key ] && break
+            fi
+            sleep 1
+          done
+          if [ ! -s /tmp/gw2a.key ]; then
+            echo "::error::could not read the generated API key"; tail -20 /tmp/gw2a.log; exit 1
+          fi
+          for i in $(seq 1 30); do
+            if curl -sf -m 5 -H "Authorization: Bearer $(cat /tmp/gw2a.key)" \
+               http://127.0.0.1:8083/v1/models > /tmp/models.json; then
               echo "backend up after ${i}s"; break
             fi
             sleep 1
           done
-          if ! curl -sf -m 5 http://127.0.0.1:8083/v1/models > /tmp/models.json; then
+          if ! curl -sf -m 5 -H "Authorization: Bearer $(cat /tmp/gw2a.key)" \
+               http://127.0.0.1:8083/v1/models > /tmp/models.json; then
             echo "::error::backend did not start"; tail -40 /tmp/gw2a.log; exit 1
           fi
-          head -c 300 /tmp/models.json; echo
+          head -c 200 /tmp/models.json; echo
+
+      - name: Read the backend API key
+        id: key
+        run: echo "GW2A_KEY=$(cat /tmp/gw2a.key)" >> "$GITHUB_ENV"
 
       - name: Translate pending chapters
         env:
           GEMINI_API_BASE: http://127.0.0.1:8083/v1
           GEMINI_MODEL: ${{ inputs.model || 'gemini-3.6-flash' }}
+          GEMINI_API_KEY: ${{ env.GW2A_KEY }}
         run: |
+          if [ "${{ inputs.selftest || 'no' }}" = "yes" ]; then
+            python3 tools/translate-batch.py --selftest --model "$GEMINI_MODEL"
+            exit 0
+          fi
           python3 tools/translate-batch.py \
             --count "${{ inputs.count || '10' }}" \
             --start "${{ inputs.start || '0' }}" \

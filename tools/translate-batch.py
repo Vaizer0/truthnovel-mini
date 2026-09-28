@@ -203,6 +203,48 @@ def translate(base, key, model, text, target="English"):
     return "\n\n".join(out)
 
 
+def selftest(base, key, model):
+    """Prove the backend works before blaming the novel.
+
+    Distinguishes the two failure modes that look identical from the outside:
+    a bad/expired cookie (backend hangs or 401s on a trivial question) versus
+    Gemini declining this book's text (backend fine, novel refused).
+    """
+    checks = [
+        ("plain question", "What is the capital of France? Answer in one word.", None),
+        (
+            "generic translation",
+            "Translate to English: The central bank raised interest rates by "
+            "half a percentage point on Tuesday.",
+            None,
+        ),
+    ]
+    for label, text, sysmsg in checks:
+        body = json.dumps(
+            {
+                "model": model,
+                "stream": False,
+                "messages": ([{"role": "system", "content": sysmsg}] if sysmsg else [])
+                + [{"role": "user", "content": text}],
+            }
+        ).encode()
+        headers = {"Content-Type": "application/json"}
+        if key:
+            headers["Authorization"] = "Bearer " + key
+        t = time.time()
+        try:
+            raw = http(base.rstrip("/") + "/chat/completions", body, headers, timeout=90)
+            out = clean_out((json.loads(raw).get("choices") or [{}])[0].get("message", {}).get("content"))
+        except Exception as e:
+            print("  %-20s FAIL after %.0fs: %s" % (label, time.time() - t, e))
+            return False
+        if not out:
+            print("  %-20s FAIL: empty reply" % label)
+            return False
+        print("  %-20s OK (%.0fs): %s" % (label, time.time() - t, out[:70]))
+    return True
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--count", type=int, default=10)
@@ -211,6 +253,7 @@ def main():
     ap.add_argument("--model", default=os.environ.get("GEMINI_MODEL", "gemini-3.6-flash"))
     ap.add_argument("--base", default=os.environ.get("GEMINI_API_BASE", "http://127.0.0.1:8083/v1"))
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--selftest", action="store_true", help="check the backend, translate nothing")
     a = ap.parse_args()
 
     catalog = json.load(open(os.path.join(ROOT, "chapters.json"), encoding="utf-8"))["chapters"]
@@ -227,6 +270,13 @@ def main():
         return 0
 
     key = os.environ.get("GEMINI_API_KEY", "")
+    if a.selftest:
+        print("selftest against %s (model %s)" % (a.base, a.model))
+        if not selftest(a.base, key, a.model):
+            print("\nRESULT: backend unusable - the cookie is missing, expired, or rate limited.")
+            return 2
+        print("\nRESULT: backend healthy. If chapters still fail, Gemini is refusing this novel.")
+        return 0
     print("backend %s  model %s  targets %d" % (a.base, a.model, len(targets)))
     if a.dry_run:
         for c in targets:
