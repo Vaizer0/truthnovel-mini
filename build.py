@@ -134,7 +134,8 @@ patch(
     'catch(e){body.innerHTML="<div class=empty>Could not load this chapter.<br><small>"+esc(e.message)+"</small></div>"}',
     'catch(e){body.innerHTML="<div class=empty>Could not load this chapter.<br><small>"+esc(e.message)+"</small><br><br>'
     'The chapter list is bundled, but chapter text must be fetched live and this site blocks direct browser requests.<br>'
-    'Deploy the free relay from the <code>worker/</code> folder in the repo, then paste its URL into Settings.'
+    'Deploy the free relay from the <code>worker/</code> folder in the repo, then paste its URL into Settings.<br>'
+    '<small>A relay that returns a block page or an empty shell will still fail here - the error above says which.</small>'
     '</div>"}',
 )
 
@@ -152,6 +153,17 @@ OLD_READ = (
 NEW_READ = (
     'const SEL="article,.entry-content,.post-content,.post-body,.td-post-content,'
     '.single-content,.entry,.content-area,#content,main";'
+    'const NAV=/^\\s*(?:الموضوع التالي|الموضوع السابق|Previous|Next|Share|Shares|'
+    'Post Views|Views?|Comments?|مشارك|تعليقات|Read next)\\b/i;'
+    'function fromMarkdown(md){'
+    'let s=md.replace(/^Title:.*$/m,"").replace(/^URL Source:.*$/m,"")'
+    '.replace(/^Published Time:.*$/m,"").replace(/^Markdown Content:\\s*/m,"")'
+    '.replace(/^Warning:.*$/m,"").replace(/^\\s*\\[[^\\]]*\\]\\([^)]*\\)\\s*$/gm,"")'
+    '.replace(/!\\[[^\\]]*\\]\\([^)]*\\)/g,"")'
+    '.replace(/\\[([^\\]]*)\\]\\([^)]*\\)/g,"$1\\n\\n")'
+    '.replace(/^#{1,6}\\s*/gm,"").replace(/[*_`>]/g," ").replace(/\\r/g,"");'
+    'return s.split(/\\n{2,}/).map(p=>p.replace(/[ \\t]+/g," ").trim())'
+    '.filter(p=>p.length>25&&!NAV.test(p)&&AR.test(p)&&!/^https?:/i.test(p))}'
     'async function read(h){'
     'const d=new DOMParser().parseFromString(h,"text/html");'
     'if(!d.body)throw Error("empty response");'
@@ -166,16 +178,42 @@ NEW_READ = (
     'for(const p of d.querySelectorAll("p")){const n=p.parentElement;if(!n)continue;'
     'g.set(n,(g.get(n)||0)+1)}'
     'for(const [n,c] of g){if(c>=3&&c*1000+(n.textContent||"").length>bs){bs=c*1000;best=n}}}'
-    'if(!best)throw Error("no chapter text in the response ("+(d.body.textContent||"").trim().length+" chars returned)");'
-    'best.querySelectorAll("script,style,ins,iframe,noscript,svg").forEach(x=>x.remove());'
+    'if(best){best.querySelectorAll("script,style,ins,iframe,noscript,svg").forEach(x=>x.remove());'
     'const seen=new Set(),out=[];'
     'for(const p of best.querySelectorAll("p")){const s=(p.textContent||"").replace(/\\u00a0/g," ")'
     '.replace(/[ \\t]+/g," ").trim();if(!s||seen.has(s))continue;seen.add(s);out.push(s)}'
-    'if(!out.length)throw Error("chapter container found but it held no readable paragraphs");'
-    'return out.join("\\n\\n")}'
+    'if(out.length>=3)return out.join("\\n\\n")}'
+    # A relay that falls back to r.jina.ai returns markdown, which has no <p>
+    # elements at all. This is the usual reason a live relay still reports
+    # "no chapter text" even though it returned the whole chapter.
+    'const md=fromMarkdown(h);'
+    'if(md.length>=3)return md.join("\\n\\n");'
+    'throw Error("no chapter text in the response ("+(d.body.textContent||"").trim().length'
+    '+" chars, "+d.querySelectorAll("p").length+" <p> tags, "+md.length+" markdown paragraphs) '
+    '- the relay returned something that is not the chapter")}'
 )
 
 PATCHES.append(("read-robust", OLD_READ, NEW_READ))
+
+
+# --- N. validate every route, not just its byte count ----------------------
+# A relay can return HTTP 200 with a block page or markdown that parses to
+# nothing. Previously one such route aborted the whole chain, so the working
+# routes after it were never tried.
+patch(
+    "get-text-helper",
+    'async function get(u){',
+    'async function getText(u){const c=chain(u),n=[];'
+    'for(const x of c){try{const h=await raw(x);return await read(h)}catch(err){n.push(err.message)}}'
+    'throw Error("Could not read this chapter from any route: "+n.slice(0,3).join(" / "))}\n'
+    'async function get(u){',
+)
+
+patch(
+    "per-route-validation",
+    'txt=stored||norm(await read(await get(x.url)));',
+    'txt=stored||norm(await getText(x.url));',
+)
 
 
 # --- L. api.txt: hosted translation backend URL, same pattern as relay.txt --
