@@ -1,0 +1,59 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify page is self-contained
+        run: |
+          set -euo pipefail
+          test -f index.html
+          test -f relay.txt
+          # The published page must not carry local dev references.
+          ! grep -q "127.0.0.1:8080/_p" index.html
+          # Sanity-check the script block parses as JavaScript.
+          python3 - <<'PY'
+          import re, sys
+          html = open("index.html", encoding="utf-8").read()
+          m = re.search(r"<script>\n\(\(\)=>\{.*?</script>", html, re.S)
+          if not m:
+              sys.exit("main script block not found")
+          open("page.js", "w", encoding="utf-8").write(m.group(0).split("</script>")[0][8:])
+          print("extracted %d bytes of JS" % len(m.group(0)))
+          PY
+          node --check page.js
+          echo "index.html checks passed"
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: |
+            index.html
+            relay.txt
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

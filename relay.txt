@@ -1,0 +1,3 @@
+# Paste your deployed Cloudflare Worker URL here, one line, no trailing slash.
+# Example: https://truthnovel-relay.your-name.workers.dev
+# Leave empty to configure it in the page Settings instead.
