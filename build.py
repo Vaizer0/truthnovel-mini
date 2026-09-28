@@ -128,6 +128,16 @@ patch(
     'Reading a chapter needs a relay: the site blocks direct browser requests. Deploy <code>worker/</code> from the repo and paste its URL into Settings (or into relay.txt).',
 )
 
+# --- K. a failed chapter read should say what to do, not just "Failed" -----
+patch(
+    "chapter-read-error",
+    'catch(e){body.innerHTML="<div class=empty>Could not load this chapter.<br><small>"+esc(e.message)+"</small></div>"}',
+    'catch(e){body.innerHTML="<div class=empty>Could not load this chapter.<br><small>"+esc(e.message)+"</small><br><br>'
+    'The chapter list is bundled, but chapter text must be fetched live and this site blocks direct browser requests.<br>'
+    'Deploy the free relay from the <code>worker/</code> folder in the repo, then paste its URL into Settings.'
+    '</div>"}',
+)
+
 
 def main():
     with open(SRC, encoding="utf-8", errors="replace") as f:

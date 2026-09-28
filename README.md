@@ -32,7 +32,28 @@ GitHub Pages is static and cannot proxy at request time, so a relay is required.
 Every route has a 25 s timeout and rejects bodies under 2000 bytes, so a blank
 `200` is treated as a failure rather than an empty chapter.
 
-## Setting up the relay (required for the hosted page)
+## Chapter list vs. chapter text
+
+The two are fetched differently, which is why the page can show a list even
+with no relay configured:
+
+| Part | Source | Needs a relay? |
+| --- | --- | --- |
+| Chapter list (2478 entries) | `chapters.json`, bundled in this repo | No — loaded same-origin |
+| Chapter text | fetched live from the source site | **Yes** |
+
+The upstream site answers `200` with a **0-byte body** from most networks and
+sends no CORS headers, so a browser can never read it directly. That is why the
+list is snapshotted:
+
+```bash
+python3 tools/fetch-index.py   # regenerates chapters.json
+```
+
+Until you configure a relay, the list works and opening a chapter shows an
+actionable message instead of a bare network error.
+
+## Setting up the relay (required for reading chapters)
 
 The Worker is in [`worker/`](worker/). It fetches the upstream page, enforces CORS,
 and falls back to `r.jina.ai` if the direct fetch is empty. It also blocks
@@ -76,6 +97,25 @@ original page never contained one. The page posts to any OpenAI-compatible
 > **Important:** on a hosted page `127.0.0.1` means **the device you are viewing it
 > on**, not a server. To translate from a public URL, either run gemini-web2api
 > locally on that device, or paste another OpenAI-compatible base URL in Settings.
+
+### Known backend limitation: Gemini refuses this novel
+
+Tested against `gemini-web2api` on this device, every Gemini model in the list
+(`3.6-flash`, `3.7-flash`, `3.5-flash`) refuses to translate this book's text —
+even for a single short paragraph — with responses like:
+
+- `I'm just a language model and I can't help you with that.`
+- `I'm having a hard time fulfilling your request…`
+- `أنا مجرد نموذج لغوي ولا يمكنني مساعدتك في هذا الأمر`
+
+This is a **model-side content policy, not a page bug.** No prompt wording,
+chunk size, or retry will change it, and the page does not attempt to work
+around it. Instead it detects refusals and says so plainly, instead of
+rendering the refusal as if it were the translation.
+
+To get translations you need an endpoint you are licensed to send this text to
+(for example a local model, or a provider account whose terms permit it), then
+point Settings at it.
 
 Reliability changes in this version, all covered by `tools/test-sanitizer.js`:
 
