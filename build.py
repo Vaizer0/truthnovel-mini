@@ -113,6 +113,22 @@ patch(
 )
 
 
+# --- I. bundled catalog: load chapters.json before hitting any relay -------
+patch(
+    "bundled-catalog",
+    'if(!force)try{const c=JSON.parse(localStorage.getItem(C)||"null");if(c?.chapters){ch=c.chapters;render()}}catch{};let err="";',
+    'if(!force)try{const c=JSON.parse(localStorage.getItem(C)||"null");if(c?.chapters){ch=c.chapters;render()}}catch{};let err="";'
+    'if(!force)try{const j=JSON.parse(await raw("chapters.json",15000));if(j&&j.chapters&&j.chapters.length>10){ch=j.chapters;try{localStorage.setItem(C,JSON.stringify({at:Date.now(),chapters:ch}))}catch{};render();return}}catch(e){err="bundled catalog: "+e.message};',
+)
+
+# --- J. clearer guidance when a chapter body cannot be fetched ------------
+patch(
+    "read-error-hint",
+    'If the source is blocked on your network, deploy the relay from <code>worker/</code> and paste its URL into Settings.',
+    'Reading a chapter needs a relay: the site blocks direct browser requests. Deploy <code>worker/</code> from the repo and paste its URL into Settings (or into relay.txt).',
+)
+
+
 def main():
     with open(SRC, encoding="utf-8", errors="replace") as f:
         s = f.read()

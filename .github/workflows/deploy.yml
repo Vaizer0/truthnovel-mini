@@ -25,6 +25,7 @@ jobs:
           set -euo pipefail
           test -f index.html
           test -f relay.txt
+          test -f chapters.json
           # The published page must not carry local dev references.
           ! grep -q "127.0.0.1:8080/_p" index.html
           # Sanity-check the script block parses as JavaScript.
@@ -46,7 +47,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p site
-          cp index.html relay.txt site/
+          cp index.html relay.txt chapters.json site/
           chmod 644 site/*
           ls -la site
 
