@@ -139,6 +139,45 @@ patch(
 )
 
 
+OLD_READ = (
+    'async function read(h){const d=new DOMParser().parseFromString(h,"text/html"),'
+    'c=[...d.querySelectorAll("article,.entry-content,.post-content")]'
+    '.map(x=>[x,x.querySelectorAll("p").length]).sort((x,y)=>y[1]-x[1]),a=c[0]&&c[0][0];'
+    'if(!a)throw Error("Chapter article not found");'
+    'a.querySelectorAll("script,style").forEach(x=>x.remove());'
+    'const p=[...a.querySelectorAll("p")].map(x=>(x.textContent||"").replace(/\\u00a0/g," ").trim()).filter(Boolean);'
+    'return p.join("\\n\\n")}'
+)
+
+NEW_READ = (
+    'const SEL="article,.entry-content,.post-content,.post-body,.td-post-content,'
+    '.single-content,.entry,.content-area,#content,main";'
+    'async function read(h){'
+    'const d=new DOMParser().parseFromString(h,"text/html");'
+    'if(!d.body)throw Error("empty response");'
+    'const head=((d.querySelector("title")||{}).textContent||"")+" "+(d.body.textContent||"").slice(0,2000);'
+    'if(/just a moment|attention required|enable javascript and cookies|access denied|'
+    'checking your browser|cf-error|error 5\\d\\d|request blocked|forbidden/i.test(head))'
+    'throw Error("the relay or your network returned a block/error page, not the chapter");'
+    'let best=null,bs=0;'
+    'for(const x of d.querySelectorAll(SEL)){const p=x.querySelectorAll("p").length,'
+    's=p*1000+(x.textContent||"").trim().length;if(p>=3&&s>bs){bs=s;best=x}}'
+    'if(!best){const g=new Map();'
+    'for(const p of d.querySelectorAll("p")){const n=p.parentElement;if(!n)continue;'
+    'g.set(n,(g.get(n)||0)+1)}'
+    'for(const [n,c] of g){if(c>=3&&c*1000+(n.textContent||"").length>bs){bs=c*1000;best=n}}}'
+    'if(!best)throw Error("no chapter text in the response ("+(d.body.textContent||"").trim().length+" chars returned)");'
+    'best.querySelectorAll("script,style,ins,iframe,noscript,svg").forEach(x=>x.remove());'
+    'const seen=new Set(),out=[];'
+    'for(const p of best.querySelectorAll("p")){const s=(p.textContent||"").replace(/\\u00a0/g," ")'
+    '.replace(/[ \\t]+/g," ").trim();if(!s||seen.has(s))continue;seen.add(s);out.push(s)}'
+    'if(!out.length)throw Error("chapter container found but it held no readable paragraphs");'
+    'return out.join("\\n\\n")}'
+)
+
+PATCHES.append(("read-robust", OLD_READ, NEW_READ))
+
+
 def main():
     with open(SRC, encoding="utf-8", errors="replace") as f:
         s = f.read()
