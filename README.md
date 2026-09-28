@@ -32,6 +32,36 @@ GitHub Pages is static and cannot proxy at request time, so a relay is required.
 Every route has a 25 s timeout and rejects bodies under 2000 bytes, so a blank
 `200` is treated as a failure rather than an empty chapter.
 
+## Translation on GitHub (no local setup)
+
+Translation runs on GitHub and its output is committed, so the hosted page
+serves translations straight from GitHub Pages with nothing running locally.
+
+1. Add a repository secret **Settings → Secrets and variables → Actions**:
+   `GEMINI_COOKIE` — the raw Google cookie header from a signed-in
+   `gemini.google.com` session, e.g.
+   `__Secure-1PSID=...; __Secure-1PSIDTS=...; SAPISID=...`
+2. Run the **Translate chapters** workflow (Actions tab → Run workflow) and set
+   how many chapters to do.
+
+The workflow builds [`zexadev/gemini-web2api-go`](https://github.com/zexadev/gemini-web2api-go)
+in the runner, starts it on `127.0.0.1:8083`, translates the next N chapters that
+have no cached translation, writes `i18n/<chapter-id>.json`, commits, and
+triggers the Pages deploy. The page then finds that file same-origin and shows
+the translation without calling any API.
+
+If Gemini declines a chapter, the run says so in the log and writes **no** file,
+so the repository never fills up with refusals presented as translations.
+
+`api.txt` is the alternative wiring: put an OpenAI-compatible base URL there
+(such as a hosted gemini-web2api-go) and every visitor uses it directly.
+
+> **Note on capacity:** GitHub Actions cannot host the translation API itself —
+> a job tops out at 6 hours and free accounts get 2,000 minutes a month. That is
+> why translation is a batch job that commits results, not a live service. If you
+> want on-demand translation for every chapter without waiting for a batch, run
+> gemini-web2api-go on a free container host and put its URL in `api.txt`.
+
 ## Chapter list vs. chapter text
 
 The two are fetched differently, which is why the page can show a list even

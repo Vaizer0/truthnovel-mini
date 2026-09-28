@@ -47,7 +47,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p site
-          cp index.html relay.txt chapters.json site/
+          cp index.html relay.txt chapters.json api.txt site/
+          if [ -d i18n ]; then mkdir -p site/i18n && cp -r i18n/. site/i18n/; fi
           chmod 644 site/*
           ls -la site
 

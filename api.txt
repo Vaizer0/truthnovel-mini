@@ -1,0 +1,4 @@
+# Base URL of an OpenAI-compatible translation backend, served from GitHub Pages.
+# Leave as a comment to use the page default, or set one URL per line:
+#   https://your-gemini-web2api-go-host.example.com/v1
+# Run the "Translate chapters" workflow to fill i18n/ instead - then no API is needed.

@@ -1,0 +1,132 @@
+name: Translate chapters
+
+# Translates chapters on GitHub and commits them as i18n/<chapter-id>.json,
+# which the hosted page loads same-origin. Nothing needs to run locally.
+#
+# Required repository secret:
+#   GEMINI_COOKIE  raw Google cookie header for gemini-web2api-go, e.g.
+#                 __Secure-1PSID=...; __Secure-1PSIDTS=...; SAPISID=...
+#   (get it from a signed-in gemini.google.com browser session)
+#
+# Run it from the Actions tab -> "Translate chapters" -> Run workflow.
+# The run only commits chapters Gemini actually translated; refusals are
+# reported in the log and never written to the repo.
+
+on:
+  workflow_dispatch:
+    inputs:
+      count:
+        description: "How many untranslated chapters to do"
+        required: false
+        default: "10"
+      start:
+        description: "Skip this many pending chapters (0 = newest first)"
+        required: false
+        default: "0"
+      model:
+        description: "Gemini model id"
+        required: false
+        default: "gemini-3.6-flash"
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: translate
+  cancel-in-progress: false
+
+jobs:
+  translate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+
+    steps:
+      - name: Check out the reader repo
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - name: Report whether a cookie secret is present
+        env:
+          COOKIE: ${{ secrets.GEMINI_COOKIE }}
+        run: |
+          if [ -z "$COOKIE" ]; then
+            echo "::error::GEMINI_COOKIE secret is not set - add it under Settings > Secrets."
+            exit 1
+          fi
+          echo "cookie secret present (${#COOKIE} chars, not printing)"
+
+      - name: Build gemini-web2api-go
+        run: |
+          git clone --depth 1 https://github.com/zexadev/gemini-web2api-go gw2a
+          cd gw2a
+          go build -o /tmp/gemini-web2api .
+          /tmp/gemini-web2api --version 2>/dev/null || true
+
+      - name: Start the translation backend
+        env:
+          COOKIE: ${{ secrets.GEMINI_COOKIE }}
+          MODEL: ${{ inputs.model || 'gemini-3.6-flash' }}
+        run: |
+          printf '%s' "$COOKIE" > /tmp/cookie.txt
+          chmod 600 /tmp/cookie.txt
+          cat > /tmp/gw2a.json <<EOF
+          {
+            "port": 8083,
+            "host": "127.0.0.1",
+            "db_path": "/tmp/gemini.db",
+            "admin_enabled": false,
+            "admin_token": "",
+            "default_model": "$MODEL",
+            "retry_attempts": 3,
+            "retry_delay_sec": 3,
+            "request_timeout_sec": 180,
+            "cookie_file": "/tmp/cookie.txt",
+            "log_requests": true
+          }
+          EOF
+          nohup /tmp/gemini-web2api --config /tmp/gw2a.json > /tmp/gw2a.log 2>&1 &
+          echo $! > /tmp/gw2a.pid
+          for i in $(seq 1 30); do
+            if curl -sf -m 5 http://127.0.0.1:8083/v1/models > /tmp/models.json; then
+              echo "backend up after ${i}s"; break
+            fi
+            sleep 1
+          done
+          if ! curl -sf -m 5 http://127.0.0.1:8083/v1/models > /tmp/models.json; then
+            echo "::error::backend did not start"; tail -40 /tmp/gw2a.log; exit 1
+          fi
+          head -c 300 /tmp/models.json; echo
+
+      - name: Translate pending chapters
+        env:
+          GEMINI_API_BASE: http://127.0.0.1:8083/v1
+          GEMINI_MODEL: ${{ inputs.model || 'gemini-3.6-flash' }}
+        run: |
+          python3 tools/translate-batch.py \
+            --count "${{ inputs.count || '10' }}" \
+            --start "${{ inputs.start || '0' }}" \
+            --model "$GEMINI_MODEL"
+
+      - name: Stop the backend
+        if: always()
+        run: kill "$(cat /tmp/gw2a.pid)" 2>/dev/null || true
+
+      - name: Commit translations and redeploy the page
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add i18n
+          if git diff --cached --quiet; then
+            echo "nothing new to commit"
+            exit 0
+          fi
+          git commit -m "i18n: translate ${{ inputs.count || 10 }} chapter(s) [skip ci]"
+          git push
+          # publish the new cache to GitHub Pages
+          gh workflow run deploy.yml --ref "${{ github.ref_name }}" || \
+            echo "::warning::could not trigger the Pages deploy"

@@ -178,6 +178,31 @@ NEW_READ = (
 PATCHES.append(("read-robust", OLD_READ, NEW_READ))
 
 
+# --- L. api.txt: hosted translation backend URL, same pattern as relay.txt --
+patch(
+    "api-bootstrap",
+    '$("api").value=d.api;$("relay").value=d.relay||"";$("key").value=d.key;',
+    '$("api").value=d.api;$("relay").value=d.relay||"";$("key").value=d.key;'
+    'fetch("api.txt",{cache:"no-store"}).then(r=>r.ok?r.text():"").then(t=>{t=(t||"").trim();'
+    'if(t&&t[0]!=="#"&&!d.api){d.api=t;$("api").value=t;msg("Translation API loaded from api.txt")}})'
+    ".catch(()=>{});",
+)
+
+# --- M. serve chapters already translated by the Actions workflow ----------
+patch(
+    "i18n-cache",
+    'async function translate(){if(!txt)return;const cached=localStorage.getItem(T+"-"+(ch[cur].n||cur+1));'
+    'if(cached){eng=cached;show(eng,true);showEng=true;return}$("state").classList.add("on");',
+    'async function translate(){if(!txt)return;const cached=localStorage.getItem(T+"-"+(ch[cur].n||cur+1));'
+    'if(cached){eng=cached;show(eng,true);showEng=true;return}'
+    'try{const r=await fetch("i18n/"+encodeURIComponent(ch[cur].id)+".json",{cache:"force-cache"});'
+    'if(r.ok){const j=await r.json();if(j&&typeof j.text==="string"&&j.text.length>200){'
+    'eng=j.text;show(eng,true);showEng=true;$("translate").textContent="Show original";'
+    'try{localStorage.setItem(T+"-"+(ch[cur].n||cur+1),eng)}catch{};return}}}catch{}'
+    '$("state").classList.add("on");',
+)
+
+
 def main():
     with open(SRC, encoding="utf-8", errors="replace") as f:
         s = f.read()
